@@ -405,6 +405,31 @@ func TestRequestInfo_Validate(t *testing.T) {
 	}
 }
 
+// ExampleRequestInfo_Validate shows both halves of Validate's contract: a
+// well-formed x402 request is accepted, and an mpp_session request with no
+// channel is rejected with ErrChannelMismatch, identified with errors.Is
+// rather than by comparing the message. The remaining rejection classes —
+// ErrConsumerEmpty and ErrUnknownProtocol — are covered by
+// TestRequestInfo_Validate.
+func ExampleRequestInfo_Validate() {
+	accepted := RequestInfo{
+		Consumer: "GAJ46LDZSSYAB4YY6VMPM763P652ZROT7TBG3YYE3BZBAUZDXYDDK6OY",
+		Protocol: ProtocolX402,
+	}
+	fmt.Println("accepted:", accepted.Validate() == nil)
+
+	rejected := RequestInfo{
+		Consumer: "GAJ46LDZSSYAB4YY6VMPM763P652ZROT7TBG3YYE3BZBAUZDXYDDK6OY",
+		Protocol: ProtocolMPPSession, // Channel deliberately left unset.
+	}
+	err := rejected.Validate()
+	fmt.Println("rejected:", errors.Is(err, ErrChannelMismatch))
+
+	// Output:
+	// accepted: true
+	// rejected: true
+}
+
 // ExampleRecorder shows how a caller actually obtains and uses a Recorder.
 // Recorder is an interface (metering.go), so "constructing" one means
 // implementing RecordRequest — internal/store's request-persistence type
