@@ -78,6 +78,42 @@ func ExampleNewCatalog() {
 	// rejected: true
 }
 
+// ExampleCatalogVersion shows how a caller fills in a CatalogVersion. All
+// three fields are the caller's to set — the version number and the
+// effective ledger price_book published for it, and the Schedule parsed
+// from that version's own document — because a CatalogVersion is input to
+// NewCatalog, never an output of this package. The zero value sets none of
+// them, and NewCatalog rejects it with ErrNilSchedule rather than accepting
+// a version that could never price anything.
+func ExampleCatalogVersion() {
+	schedule, err := ParseSchedule([]byte(`{"rules":[{"method":"GET","path_template":"/v1/items","unit_price":"1500"}]}`))
+	if err != nil {
+		panic(err)
+	}
+
+	// A caller sets every field. The version number and effective ledger
+	// come from the price_book publish event (§4); the schedule is parsed
+	// from the document that version's uri pointed at.
+	entry := CatalogVersion{
+		Version:         1,
+		EffectiveLedger: 1000,
+		Schedule:        schedule,
+	}
+	fmt.Println("version:", entry.Version)
+	fmt.Println("effective ledger:", entry.EffectiveLedger)
+	fmt.Println("schedule set:", entry.Schedule != nil)
+
+	// The zero value sets none of them, and is rejected outright.
+	_, err = NewCatalog(CatalogVersion{})
+	fmt.Println("zero value rejected:", errors.Is(err, ErrNilSchedule))
+
+	// Output:
+	// version: 1
+	// effective ledger: 1000
+	// schedule set: true
+	// zero value rejected: true
+}
+
 func TestCatalog_VersionAt_PicksTheEffectiveVersion(t *testing.T) {
 	schedV1 := mustSchedule(t, `{"rules":[{"method":"GET","path_template":"/v1/x","unit_price":"100"}]}`)
 	schedV2 := mustSchedule(t, `{"rules":[{"method":"GET","path_template":"/v1/x","unit_price":"200"}]}`)
