@@ -71,27 +71,40 @@ type RequestInfo struct {
 	Channel  string // non-empty iff Protocol == ProtocolMPPSession
 }
 
+// Sentinel errors for RequestInfo.Validate, one per rejection class, so a
+// caller can match the reason with errors.Is instead of parsing the
+// message; the wrapping still names the offending value. They mirror the
+// requests table's own CHECK constraint (§5) — see Validate.
+var (
+	ErrConsumerEmpty   = errors.New("httpapi: request info: consumer is empty")
+	ErrUnknownProtocol = errors.New("httpapi: request info: unknown protocol")
+	ErrChannelMismatch = errors.New("httpapi: request info: channel does not match protocol")
+)
+
 // Validate reports whether info is well-formed enough to record: Consumer
 // and Protocol set, Protocol one of the three known values, and Channel set
 // iff Protocol is ProtocolMPPSession. This mirrors the requests table's own
 // CHECK constraint (§5) so a malformed RequestInfo fails loudly here,
 // naming the problem, rather than surfacing later as an opaque database
 // constraint violation.
+//
+// Each rejection is one of ErrConsumerEmpty, ErrUnknownProtocol, or
+// ErrChannelMismatch, identified with errors.Is.
 func (info RequestInfo) Validate() error {
 	if info.Consumer == "" {
-		return errors.New("httpapi: request info: consumer is empty")
+		return ErrConsumerEmpty
 	}
 	switch info.Protocol {
 	case ProtocolX402, ProtocolMPPCharge, ProtocolMPPSession:
 	default:
-		return fmt.Errorf("httpapi: request info: protocol must be one of %q, %q, %q, got %q",
-			ProtocolX402, ProtocolMPPCharge, ProtocolMPPSession, info.Protocol)
+		return fmt.Errorf("%w: must be one of %q, %q, %q, got %q",
+			ErrUnknownProtocol, ProtocolX402, ProtocolMPPCharge, ProtocolMPPSession, info.Protocol)
 	}
 	hasChannel := info.Channel != ""
 	isSession := info.Protocol == ProtocolMPPSession
 	if hasChannel != isSession {
-		return fmt.Errorf("httpapi: request info: channel must be set if and only if protocol is %q (channel=%q, protocol=%q)",
-			ProtocolMPPSession, info.Channel, info.Protocol)
+		return fmt.Errorf("%w: channel must be set if and only if protocol is %q (channel=%q, protocol=%q)",
+			ErrChannelMismatch, ProtocolMPPSession, info.Channel, info.Protocol)
 	}
 	return nil
 }

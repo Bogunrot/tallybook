@@ -8,6 +8,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -391,10 +392,11 @@ func readSecretFile(path string) (Secret, error) {
 	return Secret(trimmed), nil
 }
 
+// joinErrors folds every validation failure into one error with the same
+// message format callers already see, but preserves each failure's own
+// wrap chain instead of flattening it to text: errors.Is can still match a
+// sentinel one of the failures wrapped (os.ErrNotExist from a secret file
+// read, say) even though all the texts are joined into one report.
 func joinErrors(errs []error) error {
-	msgs := make([]string, len(errs))
-	for i, err := range errs {
-		msgs[i] = err.Error()
-	}
-	return fmt.Errorf("%d configuration error(s):\n%s", len(errs), strings.Join(msgs, "\n"))
+	return fmt.Errorf("%d configuration error(s):\n%w", len(errs), errors.Join(errs...))
 }
