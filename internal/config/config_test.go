@@ -465,3 +465,60 @@ func ExampleLoad() {
 	// accepted: true
 	// rejected: true
 }
+
+// ExampleLoadEnv shows the same two halves as ExampleLoad through the real
+// process environment LoadEnv reads: the complete valid environment is
+// accepted, and the file secret source pointing at a nonexistent path is
+// rejected with an error matching os.ErrNotExist. LoadEnv resolves through
+// os.LookupEnv, which cannot be injected, so the example sets and restores
+// the process environment itself; every other test injects a map instead
+// (see Lookup's doc comment).
+func ExampleLoadEnv() {
+	restore := setProcessEnv(validEnv())
+	defer restore()
+
+	cfg, err := LoadEnv()
+	fmt.Println("accepted:", err == nil && cfg != nil)
+
+	// Rejected input: switch to the file secret source and point it at a
+	// path that does not exist.
+	os.Setenv(envOperatorSecretSource, SecretSourceFile)
+	os.Unsetenv(envOperatorSecret)
+	os.Setenv(envOperatorSecretPath, "/nonexistent/tallybook/operator.key")
+
+	_, err = LoadEnv()
+	fmt.Println("rejected:", errors.Is(err, os.ErrNotExist))
+
+	// Output:
+	// accepted: true
+	// rejected: true
+}
+
+// setProcessEnv applies env to the process environment and returns a
+// function restoring each key to its previous value (or unsetting it when
+// it had none). ExampleLoadEnv is its only caller: it is the one place a
+// test has to exercise os.LookupEnv rather than an injected Lookup. The
+// Setenv/Unsetenv error returns are discarded deliberately — the documented
+// failure conditions (a malformed key or value) cannot occur for these
+// non-empty constant keys — and any silent failure would surface
+// immediately as the example's Output not matching.
+func setProcessEnv(env map[string]string) func() {
+	previous := make(map[string]*string, len(env))
+	for key, value := range env {
+		if old, ok := os.LookupEnv(key); ok {
+			previous[key] = &old
+		} else {
+			previous[key] = nil
+		}
+		_ = os.Setenv(key, value)
+	}
+	return func() {
+		for key, old := range previous {
+			if old == nil {
+				_ = os.Unsetenv(key)
+				continue
+			}
+			_ = os.Setenv(key, *old)
+		}
+	}
+}
