@@ -3,9 +3,12 @@ package settle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestCalculate_ChannelNotFound(t *testing.T) {
@@ -147,4 +150,41 @@ func TestExposure_Age(t *testing.T) {
 	if got := empty.Age(now); got != 0 {
 		t.Errorf("Age with no OldestUnsettledSince = %s, want 0", got)
 	}
+}
+
+// ExampleNewCalculator shows both halves of NewCalculator's contract.
+// NewCalculator itself never fails — it has no error return and stores pool
+// verbatim (see its doc comment) — so the rejection half only exists at the
+// first call that reads through the pool. A cancelled context is refused by
+// the pool's own acquire step before any connection is opened, keeping this
+// example runnable with or without Postgres; the returned error wraps
+// context.Canceled, identified with errors.Is rather than by comparing its
+// message. The sentinel specific to this file, ErrChannelNotFound, is
+// Calculate's answer for a channel with no channels row — that path needs a
+// real database to reach and is covered by TestCalculate_ChannelNotFound.
+func ExampleNewCalculator() {
+	// pgxpool.New opens no connection itself — connections are created
+	// lazily on first use — so no database needs to be reachable here.
+	pool, err := pgxpool.New(context.Background(), "postgres://tallybook:tallybook@localhost:5433/tallybook?sslmode=disable")
+	if err != nil {
+		panic(err)
+	}
+	defer pool.Close()
+
+	// Accepted input: a pool to read existing channels and commitments
+	// through.
+	calc := NewCalculator(pool)
+	fmt.Println("accepted:", calc != nil)
+
+	// Rejected input: a context that is already cancelled. Calculate's
+	// first action is to read the channel row through pool, which refuses
+	// the cancelled context before ever connecting.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = calc.Calculate(ctx, testChannel)
+	fmt.Println("rejected:", errors.Is(err, context.Canceled))
+
+	// Output:
+	// accepted: true
+	// rejected: true
 }
