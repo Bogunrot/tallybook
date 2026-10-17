@@ -336,3 +336,35 @@ func TestStore_Submit_NilAmount(t *testing.T) {
 		t.Fatalf("error = %v, want ErrNilAmount", err)
 	}
 }
+
+// ExampleNewStore shows both halves of NewStore's contract. NewStore itself
+// never fails — it has no error return and stores pool verbatim (see its
+// doc comment) — so the rejection half is the first call that can refuse an
+// argument: Submit with a nil CumulativeAmount returns ErrNilAmount (see
+// VerifyCommitment's sentinel block) before it touches the pool, the
+// channel, or the signer key, which keeps this example runnable with or
+// without Postgres. The rejection that needs a real database — a
+// cumulative_amount below the channel's highest, refused by the
+// commitments trigger — surfaces as ErrMonotonicViolation and is covered by
+// TestStore_Submit_RejectsMonotonicRegression.
+func ExampleNewStore() {
+	// pgxpool.New opens no connection itself — connections are created
+	// lazily on first use — so no database needs to be reachable here.
+	pool, err := pgxpool.New(context.Background(), "postgres://tallybook:tallybook@localhost:5433/tallybook?sslmode=disable")
+	if err != nil {
+		panic(err)
+	}
+	defer pool.Close()
+
+	// Accepted input: a pool to persist commitments through.
+	store := NewStore(pool)
+	fmt.Println("accepted:", store != nil)
+
+	// Rejected input: a commitment with no cumulative amount.
+	_, err = store.Submit(context.Background(), nil, SubmittedCommitment{})
+	fmt.Println("rejected:", errors.Is(err, ErrNilAmount))
+
+	// Output:
+	// accepted: true
+	// rejected: true
+}
