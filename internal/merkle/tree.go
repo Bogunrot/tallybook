@@ -14,6 +14,12 @@ const maxProofLength = 32
 // ErrEmptyTree is returned by BuildTree when given no leaves.
 var ErrEmptyTree = errors.New("merkle: cannot build a tree from zero leaves")
 
+// ErrDuplicateLeaf is returned when a leaf occurs more than once.
+var ErrDuplicateLeaf = errors.New("merkle: duplicate leaf")
+
+// ErrProofTooLong is returned when any proof would exceed the contract's 32-node cap.
+var ErrProofTooLong = errors.New("merkle: proof exceeds contract cap")
+
 // Proof is an ordered list of sibling hashes: fold(leaf, proof) reproduces
 // the tree's root when leaf and proof are consistent with it. There is no
 // leaf index — the contract's fold function doesn't take one either (§4) —
@@ -41,11 +47,14 @@ func BuildTree(leaves [][32]byte) (*Tree, error) {
 	if len(leaves) == 0 {
 		return nil, ErrEmptyTree
 	}
+	if err := validateProofDepth(uint64(len(leaves))); err != nil {
+		return nil, err
+	}
 
 	seen := make(map[[32]byte]int, len(leaves))
 	for i, l := range leaves {
 		if prior, ok := seen[l]; ok {
-			return nil, fmt.Errorf("merkle: duplicate leaf at indices %d and %d", prior, i)
+			return nil, fmt.Errorf("%w at indices %d and %d", ErrDuplicateLeaf, prior, i)
 		}
 		seen[l] = i
 	}
@@ -90,12 +99,30 @@ func BuildTree(leaves [][32]byte) (*Tree, error) {
 
 	for i, p := range proofs {
 		if len(p) > maxProofLength {
-			return nil, fmt.Errorf("merkle: proof for leaf %d has %d nodes, exceeds contract cap of %d",
-				i, len(p), maxProofLength)
+			return nil, fmt.Errorf("%w for leaf %d has %d nodes, cap is %d",
+				ErrProofTooLong, i, len(p), maxProofLength)
 		}
 	}
 
 	return &Tree{Root: level[0], Proofs: proofs}, nil
+}
+
+func proofDepth(leafCount uint64) int {
+	depth := 0
+	for leafCount > 1 {
+		leafCount = (leafCount + 1) / 2
+		depth++
+	}
+	return depth
+}
+
+func validateProofDepth(leafCount uint64) error {
+	depth := proofDepth(leafCount)
+	if depth > maxProofLength {
+		return fmt.Errorf("%w: leaf count %d requires %d proof nodes, cap is %d",
+			ErrProofTooLong, leafCount, depth, maxProofLength)
+	}
+	return nil
 }
 
 // Fold reproduces the contract's verification algorithm: starting from
