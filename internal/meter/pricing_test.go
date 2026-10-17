@@ -114,6 +114,58 @@ func ExampleCatalogVersion() {
 	// zero value rejected: true
 }
 
+// ExampleCatalog shows how a caller obtains a Catalog and reads it. Its
+// one field, versions, is unexported — NewCatalog validates and sorts the
+// caller-supplied CatalogVersion entries and is the only way to get a
+// working Catalog — so a caller sets no Catalog fields directly. VersionAt
+// is the read path: a local mirror of price_book.version_at (§4) that
+// resolves an observation ledger to the version whose schedule prices it,
+// with no chain round trip. The zero value has no versions at all.
+func ExampleCatalog() {
+	schedV1, err := ParseSchedule([]byte(`{"rules":[{"method":"GET","path_template":"/v1/items","unit_price":"100"}]}`))
+	if err != nil {
+		panic(err)
+	}
+	schedV2, err := ParseSchedule([]byte(`{"rules":[{"method":"GET","path_template":"/v1/items","unit_price":"200"}]}`))
+	if err != nil {
+		panic(err)
+	}
+
+	// How a caller builds it: every published version, in any order —
+	// NewCatalog sorts by EffectiveLedger.
+	catalog, err := NewCatalog(
+		CatalogVersion{Version: 2, EffectiveLedger: 2000, Schedule: schedV2},
+		CatalogVersion{Version: 1, EffectiveLedger: 1000, Schedule: schedV1},
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	// How a caller reads it: which version was effective at an
+	// observation ledger. A version applies from its own EffectiveLedger
+	// up to the ledger before the next one.
+	v, err := catalog.VersionAt(1999)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("ledger 1999 prices under version", v.Version)
+	v, err = catalog.VersionAt(2000)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("ledger 2000 prices under version", v.Version)
+
+	// The zero value: no versions were supplied, and there is no exported
+	// field a caller could have supplied them through.
+	var zero Catalog
+	fmt.Println("zero value version count:", len(zero.versions))
+
+	// Output:
+	// ledger 1999 prices under version 1
+	// ledger 2000 prices under version 2
+	// zero value version count: 0
+}
+
 func TestCatalog_VersionAt_PicksTheEffectiveVersion(t *testing.T) {
 	schedV1 := mustSchedule(t, `{"rules":[{"method":"GET","path_template":"/v1/x","unit_price":"100"}]}`)
 	schedV2 := mustSchedule(t, `{"rules":[{"method":"GET","path_template":"/v1/x","unit_price":"200"}]}`)
