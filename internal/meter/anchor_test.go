@@ -463,3 +463,43 @@ func ExampleAnchorSubmitter() {
 	// tx hash: a1b2c3d4
 	// zero value is nil: true
 }
+
+// ExampleAnchorer shows how a caller wires and uses an Anchorer. The type
+// has a single unexported field — the pool it reads closed periods and
+// their requests through — so a caller sets no fields directly; NewAnchorer
+// is the only construction path, and it supplies that one dependency.
+// AnchorPeriod is the entry point once wired: it anchors one closed
+// period's usage root on chain. The zero value leaves the pool unset, so
+// there is nothing for AnchorPeriod to read a period through — the type is
+// built through the constructor, never as a bare struct literal.
+func ExampleAnchorer() {
+	// pgxpool.New opens no connection itself — connections are created
+	// lazily on first use — so no database needs to be reachable here.
+	pool, err := pgxpool.New(context.Background(), "postgres://tallybook:tallybook@localhost:5433/tallybook?sslmode=disable")
+	if err != nil {
+		panic(err)
+	}
+	defer pool.Close()
+
+	// How a caller constructs it: NewAnchorer supplies the pool.
+	a := NewAnchorer(pool)
+
+	// How a caller uses it: AnchorPeriod anchors a closed period. The
+	// cancelled context is refused by the pool's acquire step before any
+	// connection is opened, keeping this example runnable with or without
+	// Postgres; the nil signer and registry are never reached.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = a.AnchorPeriod(ctx, 1, nil, nil, "", big.NewInt(0))
+	fmt.Println("constructed:", a != nil)
+	fmt.Println("cancelled context honoured:", errors.Is(err, context.Canceled))
+
+	// The zero value: no pool was ever supplied.
+	var zero Anchorer
+	fmt.Println("zero value pool unset:", zero.pool == nil)
+
+	// Output:
+	// constructed: true
+	// cancelled context honoured: true
+	// zero value pool unset: true
+}
