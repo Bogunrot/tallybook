@@ -1,6 +1,7 @@
 package stellar
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -273,6 +274,129 @@ func TestDecode_WrongTypeReturnsTypedError(t *testing.T) {
 	if !errors.As(err, &typeErr) {
 		t.Errorf("error %v is not *ErrWrongScValType", err)
 	}
+}
+
+func FuzzDecodeScValHelpers(f *testing.F) {
+	f.Add(make([]byte, 16))
+	minimum := make([]byte, 16)
+	minimum[0] = 0x80
+	f.Add(minimum)
+	maximum := bytes.Repeat([]byte{0xff}, 16)
+	maximum[0] = 0x7f
+	f.Add(maximum)
+	f.Add([]byte{0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > 4096 {
+			t.Skip()
+		}
+
+		var valueBytes [16]byte
+		copy(valueBytes[:], data)
+		wantI128 := new(big.Int).SetBytes(valueBytes[:])
+		if valueBytes[0]&0x80 != 0 {
+			wantI128.Sub(wantI128, new(big.Int).Lsh(big.NewInt(1), 128))
+		}
+		i128Val, err := ScvI128(wantI128)
+		if err != nil {
+			t.Fatalf("ScvI128(%s): %v", wantI128, err)
+		}
+		address := "GAAACAQDAQCQMBYIBEFAWDANBYHRAEISCMKBKFQXDAMRUGY4DUPB7JZX"
+		addressVal, err := ScvAddress(address)
+		if err != nil {
+			t.Fatalf("ScvAddress: %v", err)
+		}
+		vecVal := ScvVec([]xdr.ScVal{ScvU32(uint32(len(data)))})
+		mapVal := ScvMap([]xdr.ScMapEntry{MapEntry("value", ScvBytes(data))})
+		values := []xdr.ScVal{
+			ScvBool(len(data)%2 == 0),
+			ScvU32(uint32(len(data))),
+			ScvI32(int32(len(data))),
+			ScvU64(uint64(len(data))),
+			ScvI64(int64(len(data))),
+			i128Val,
+			ScvBytes(data),
+			ScvSymbol("fuzz"),
+			ScvString(string(data)),
+			addressVal,
+			vecVal,
+			mapVal,
+		}
+
+		decodedBool, err := DecodeBool(values[0])
+		if err != nil || decodedBool != (len(data)%2 == 0) {
+			t.Fatalf("DecodeBool matching value = %v, %v", decodedBool, err)
+		}
+		decodedU32, err := DecodeU32(values[1])
+		if err != nil || decodedU32 != uint32(len(data)) {
+			t.Fatalf("DecodeU32 matching value = %d, %v", decodedU32, err)
+		}
+		decodedI32, err := DecodeI32(values[2])
+		if err != nil || decodedI32 != int32(len(data)) {
+			t.Fatalf("DecodeI32 matching value = %d, %v", decodedI32, err)
+		}
+		decodedU64, err := DecodeU64(values[3])
+		if err != nil || decodedU64 != uint64(len(data)) {
+			t.Fatalf("DecodeU64 matching value = %d, %v", decodedU64, err)
+		}
+		decodedI64, err := DecodeI64(values[4])
+		if err != nil || decodedI64 != int64(len(data)) {
+			t.Fatalf("DecodeI64 matching value = %d, %v", decodedI64, err)
+		}
+		decodedI128, err := DecodeI128(values[5])
+		if err != nil || decodedI128.Cmp(wantI128) != 0 {
+			t.Fatalf("DecodeI128 matching value = %v, %v; want %s", decodedI128, err, wantI128)
+		}
+		decodedBytes, err := DecodeBytes(values[6])
+		if err != nil || !bytes.Equal(decodedBytes, data) {
+			t.Fatalf("DecodeBytes matching value differs: %v", err)
+		}
+		decodedSymbol, err := DecodeSymbol(values[7])
+		if err != nil || decodedSymbol != "fuzz" {
+			t.Fatalf("DecodeSymbol matching value = %q, %v", decodedSymbol, err)
+		}
+		decodedString, err := DecodeString(values[8])
+		if err != nil || decodedString != string(data) {
+			t.Fatalf("DecodeString matching value differs: %v", err)
+		}
+		decodedAddress, err := DecodeAddress(values[9])
+		if err != nil || decodedAddress != address {
+			t.Fatalf("DecodeAddress matching value = %q, %v", decodedAddress, err)
+		}
+		decodedVec, err := DecodeVec(values[10])
+		if err != nil || len(decodedVec) != 1 {
+			t.Fatalf("DecodeVec matching value has %d elements: %v", len(decodedVec), err)
+		}
+		decodedMap, err := DecodeMap(values[11])
+		if err != nil || len(decodedMap) != 1 {
+			t.Fatalf("DecodeMap matching value has %d entries: %v", len(decodedMap), err)
+		}
+
+		mismatches := []struct {
+			name   string
+			decode func(xdr.ScVal) error
+		}{
+			{"Bool", func(v xdr.ScVal) error { _, err := DecodeBool(v); return err }},
+			{"U32", func(v xdr.ScVal) error { _, err := DecodeU32(v); return err }},
+			{"I32", func(v xdr.ScVal) error { _, err := DecodeI32(v); return err }},
+			{"U64", func(v xdr.ScVal) error { _, err := DecodeU64(v); return err }},
+			{"I64", func(v xdr.ScVal) error { _, err := DecodeI64(v); return err }},
+			{"I128", func(v xdr.ScVal) error { _, err := DecodeI128(v); return err }},
+			{"Bytes", func(v xdr.ScVal) error { _, err := DecodeBytes(v); return err }},
+			{"Symbol", func(v xdr.ScVal) error { _, err := DecodeSymbol(v); return err }},
+			{"String", func(v xdr.ScVal) error { _, err := DecodeString(v); return err }},
+			{"Address", func(v xdr.ScVal) error { _, err := DecodeAddress(v); return err }},
+			{"Vec", func(v xdr.ScVal) error { _, err := DecodeVec(v); return err }},
+			{"Map", func(v xdr.ScVal) error { _, err := DecodeMap(v); return err }},
+		}
+		for _, mismatch := range mismatches {
+			err := mismatch.decode(ScvVoid())
+			var typeErr *ErrWrongScValType
+			if !errors.As(err, &typeErr) {
+				t.Errorf("Decode%s mismatch error = %v, want *ErrWrongScValType", mismatch.name, err)
+			}
+		}
+	})
 }
 
 func TestMarshalScValBase64_RoundTrip(t *testing.T) {
