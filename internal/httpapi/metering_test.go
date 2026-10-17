@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"math/big"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Tallybook-Org/tallybook/internal/merkle"
 	"github.com/Tallybook-Org/tallybook/internal/meter"
 )
 
@@ -37,7 +39,7 @@ func (f *fakeRecorder) RecordRequest(_ context.Context, req RecordedRequest) err
 	return nil
 }
 
-func mustPricer(t *testing.T, unitPrice string) *meter.Pricer {
+func mustPricer(t testing.TB, unitPrice string) *meter.Pricer {
 	t.Helper()
 	sched, err := meter.ParseSchedule([]byte(`{"rules":[{"method":"GET","path_template":"/v1/items","unit_price":"` + unitPrice + `"}]}`))
 	if err != nil {
@@ -491,4 +493,84 @@ func ExampleRecorder() {
 	// protocol: x402
 	// observed ledger: 1500
 	// request id set: true
+}
+
+// BenchmarkMiddleware measures the per-request cost of metering one request
+// end to end: RequestInfo validation, the ledger read, pricing against the
+// catalog, request-ID generation, endpoint hashing, and recording. Both
+// external interfaces are the existing test stubs, so this touches neither
+// Postgres nor the network and runs in CI without the service container.
+// Every iteration takes the all-success hot path — an error from any stub
+// would have the middleware fail the request closed instead.
+//
+// recorder.recorded is truncated each iteration rather than allowed to
+// grow: the fake appends one RecordedRequest per call, and without the
+// truncation a run of b.N iterations would hold b.N of them. After the
+// first append the backing array is reused, so the append itself does not
+// allocate and the allocation count reflects the middleware, not the fake.
+func BenchmarkMiddleware(b *testing.B) {
+	recorder := &fakeRecorder{}
+	cfg := Config{
+		Operator:     "GDOLCHAOYP63BEHGAUJJS5IVQNUXLPBWCHO2HZRBTZRU52XBMW2TRJLM",
+		Method:       "GET",
+		PathTemplate: "/v1/items",
+		Pricer:       mustPricer(b, "1000"),
+		Ledger:       fakeLedgerSource{ledger: 1500},
+		Recorder:     recorder,
+	}
+
+	handler, err := Middleware(cfg)
+	if err != nil {
+		b.Fatalf("Middleware returned unexpected error: %v", err)
+	}
+
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	metered := handler(next)
+
+	info := RequestInfo{
+		Consumer: "GAJ46LDZSSYAB4YY6VMPM763P652ZROT7TBG3YYE3BZBAUZDXYDDK6OY",
+		Protocol: ProtocolX402,
+	}
+	req := httptest.NewRequest("GET", "/v1/items", nil)
+	req = req.WithContext(WithRequestInfo(req.Context(), info))
+	w := httptest.NewRecorder()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		recorder.recorded = recorder.recorded[:0]
+		metered.ServeHTTP(w, req)
+	}
+	b.StopTimer()
+
+	if len(recorder.recorded) != 1 {
+		b.Fatalf("recorded %d requests on the last iteration, want 1", len(recorder.recorded))
+	}
+}
+
+// BenchmarkEndpointHashAndRequestID isolates the two primitives the
+// middleware performs per request besides pricing — hashing the endpoint
+// (merkle.EndpointHash: sha256 over the method and path template) and
+// drawing a fresh 32-byte request ID from crypto/rand — so a regression in
+// BenchmarkMiddleware can be attributed to one of them rather than leaving
+// both as suspects. The two are sub-benchmarks rather than one loop because
+// they are independent costs and this repository's guidance is to measure
+// crypto/rand separately before concluding anything about the rest.
+func BenchmarkEndpointHashAndRequestID(b *testing.B) {
+	b.Run("EndpointHash", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = merkle.EndpointHash("GET", "/v1/items")
+		}
+	})
+
+	b.Run("RequestID", func(b *testing.B) {
+		var requestID [32]byte
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if _, err := rand.Read(requestID[:]); err != nil {
+				b.Fatalf("rand.Read returned unexpected error: %v", err)
+			}
+		}
+	})
 }
