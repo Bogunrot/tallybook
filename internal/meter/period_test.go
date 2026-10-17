@@ -432,3 +432,46 @@ func ExampleNewPeriodCloser() {
 	// accepted
 	// rejected
 }
+
+// ExampleCatalogSource shows how a caller provides a CatalogSource.
+// CatalogSource is an interface, so there are no fields to set and no
+// constructor: a caller supplies an implementation and hands it to
+// CloseDuePeriods, the one consumer, which calls CatalogFor once per
+// operator in a batch. In production that implementation is whatever wires
+// a live price_book reader to this method (out of this package, as the doc
+// comment says); in tests it is an in-memory map — the implementation
+// exercised here, since the real one would need a live Soroban RPC
+// endpoint. The zero value is a nil interface: calling through it panics,
+// which is why CloseDuePeriods takes the source as a required argument
+// rather than defaulting to one.
+func ExampleCatalogSource() {
+	// Compile-time proof an implementation satisfies the interface — this
+	// line stops compiling if CatalogFor's signature ever drifts.
+	var _ CatalogSource = (*fakeCatalogSource)(nil)
+
+	schedule, err := ParseSchedule([]byte(`{"rules":[{"method":"GET","path_template":"/v1/items","unit_price":"100"}]}`))
+	if err != nil {
+		panic(err)
+	}
+	catalog, err := NewCatalog(CatalogVersion{Version: 1, EffectiveLedger: 1000, Schedule: schedule})
+	if err != nil {
+		panic(err)
+	}
+
+	// The same single method, backed in memory by a map: exactly the call
+	// CloseDuePeriods makes while scanning open periods.
+	source := &fakeCatalogSource{catalogs: map[string]*Catalog{testOperator: catalog}}
+	got, err := source.CatalogFor(context.Background(), testOperator)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("catalog resolved:", got != nil)
+
+	// The zero value: a CatalogSource left unwired.
+	var unwired CatalogSource
+	fmt.Println("zero value is nil:", unwired == nil)
+
+	// Output:
+	// catalog resolved: true
+	// zero value is nil: true
+}
