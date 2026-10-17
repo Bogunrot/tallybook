@@ -151,6 +151,60 @@ func TestParseSchedule_AcceptsUnitPriceAtI128Max(t *testing.T) {
 	}
 }
 
+func FuzzParseSchedule(f *testing.F) {
+	f.Add([]byte(`not json`))
+	f.Add([]byte(`{"rules": []}`))
+	f.Add([]byte(`{"rules": [{"method":"GET","path_template":"/items","unit_price":"1"},{"method":"get","path_template":"/items","unit_price":"2"}]}`))
+	f.Add([]byte(`{"rules": [{"method":"","path_template":"/items","unit_price":"1"}]}`))
+	f.Add([]byte(`{"rules": [{"method":"GET","path_template":"items","unit_price":"1"}]}`))
+	f.Add([]byte(`{"rules": [{"method":"GET","path_template":"/items","unit_price":"free"}]}`))
+	f.Add([]byte(`{"rules": [{"method":"GET","path_template":"/items","unit_price":"` + new(big.Int).Add(i128Max, big.NewInt(1)).String() + `"}]}`))
+	f.Add([]byte(`{"rules": [{"method":"GET","path_template":"/items","unit_price":"` + i128Max.String() + `"}]}`))
+
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		if len(raw) > 1<<20 {
+			t.Skip()
+		}
+		schedule, err := ParseSchedule(raw)
+		if err != nil {
+			if schedule != nil {
+				t.Fatal("ParseSchedule returned a non-nil Schedule with an error")
+			}
+			for _, sentinel := range []error{
+				ErrEmptySchedule,
+				ErrDuplicateRule,
+				ErrInvalidMethod,
+				ErrInvalidPathTemplate,
+				ErrInvalidUnitPrice,
+				ErrUnitPriceOutOfRange,
+			} {
+				if errors.Is(err, sentinel) {
+					return
+				}
+			}
+			t.Fatalf("ParseSchedule returned unclassified error: %v", err)
+		}
+		if schedule == nil {
+			t.Fatal("ParseSchedule returned nil Schedule without an error")
+		}
+		rules := schedule.Rules()
+		if len(rules) == 0 {
+			t.Fatal("ParseSchedule returned a Schedule with no rules")
+		}
+		for i, rule := range rules {
+			if strings.TrimSpace(rule.Method) == "" {
+				t.Errorf("rule %d has an empty method", i)
+			}
+			if !strings.HasPrefix(rule.PathTemplate, "/") {
+				t.Errorf("rule %d path template %q does not start with /", i, rule.PathTemplate)
+			}
+			if rule.UnitPrice == nil || rule.UnitPrice.Sign() < 0 || rule.UnitPrice.Cmp(i128Max) > 0 {
+				t.Errorf("rule %d has an invalid i128 unit price: %v", i, rule.UnitPrice)
+			}
+		}
+	})
+}
+
 func TestScheduleHash_DeterministicAndSensitiveToContent(t *testing.T) {
 	a := []byte(`{"rules":[{"method":"GET","path_template":"/v1/items","unit_price":"1"}]}`)
 	b := []byte(`{"rules":[{"method":"GET","path_template":"/v1/items","unit_price":"2"}]}`)
