@@ -470,3 +470,52 @@ type exampleLedgerSource uint32
 func (l exampleLedgerSource) CurrentLedger(context.Context) (uint32, error) {
 	return uint32(l), nil
 }
+
+// ExamplePeriod shows which fields of a Period a caller sets and which the
+// package fills in. A caller never assembles one for the package: every
+// field mirrors a periods row, and PeriodCloser assigns ID, PriceVersion,
+// PeriodStart and Status when it opens a period (EnsureOpenPeriod) or
+// closes one (CloseDuePeriods). The one piece of information the caller
+// owns is the Scope it passes in, which the returned Period carries back.
+//
+// The zero value is therefore not a usable period — no scope, id 0, empty
+// status — while a period returned by the package looks like the
+// constructed value below: PeriodEnd stays nil for as long as the period
+// is open and is set, alongside the status, only when it closes.
+func ExamplePeriod() {
+	// The zero value records no period: no id, no scope, no status.
+	var zero Period
+	fmt.Println("zero value: id", zero.ID, "status empty:", zero.Status == "", "end nil:", zero.PeriodEnd == nil)
+
+	// The scope is the caller's half of the contract; everything else in
+	// the returned Period is assigned by the package.
+	scope := Scope{
+		Operator: "GDOLCHAOYP63BEHGAUJJS5IVQNUXLPBWCHO2HZRBTZRU52XBMW2TRJLM",
+		Consumer: "GAJ46LDZSSYAB4YY6VMPM763P652ZROT7TBG3YYE3BZBAUZDXYDDK6OY",
+		Protocol: "x402",
+	}
+
+	// An open period as EnsureOpenPeriod returns it: PeriodStart is the
+	// price version's own EffectiveLedger, not the ledger the request was
+	// observed at.
+	open := Period{
+		ID:           1,
+		Scope:        scope,
+		PriceVersion: 1,
+		PeriodStart:  1000,
+		Status:       "open",
+	}
+	fmt.Println("open: id", open.ID, "version", open.PriceVersion, "start", open.PeriodStart, "status", open.Status, "end nil:", open.PeriodEnd == nil)
+
+	// Closed: the package sets PeriodEnd at the close boundary — one
+	// ledger before the version that followed the period's own.
+	end := uint32(1999)
+	open.Status = "closed"
+	open.PeriodEnd = &end
+	fmt.Println("closed: status", open.Status, "end", *open.PeriodEnd)
+
+	// Output:
+	// zero value: id 0 status empty: true end nil: true
+	// open: id 1 version 1 start 1000 status open end nil: true
+	// closed: status closed end 1999
+}
