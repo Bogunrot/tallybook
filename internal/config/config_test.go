@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -435,4 +436,32 @@ func TestSecret_RedactsUnderAllFormatVerbs(t *testing.T) {
 
 func writeFile(path, contents string) error {
 	return os.WriteFile(path, []byte(contents), 0o600)
+}
+
+// ExampleLoad shows both halves of Load's contract. The accepted input is
+// the complete valid environment the rest of this file's tests use; the
+// rejection is the file secret source pointing at a path that does not
+// exist, because Load reads that file once at startup (see its doc comment
+// on the two secret sources). The wrapped read error preserves the
+// underlying os.ErrNotExist, so the example identifies the sentinel with
+// errors.Is rather than by comparing the message. The other rejection
+// classes — a missing variable, a malformed URL or strkey, a secret
+// variable left over from the other source — are covered by
+// TestLoad_MissingRequired, TestLoad_InvalidValues, and
+// TestLoad_RejectsSecretVariableForWrongMode.
+func ExampleLoad() {
+	// Accepted input: every required variable set, key supplied inline
+	// (source=env).
+	cfg, err := Load(lookupFrom(validEnv()))
+	fmt.Println("accepted:", err == nil && cfg != nil)
+
+	// Rejected input: source=file with TB_OPERATOR_SECRET_PATH pointing
+	// at a file that does not exist, and TB_OPERATOR_SECRET unset as file
+	// mode requires.
+	_, err = Load(lookupFrom(fileSourceEnv("/nonexistent/tallybook/operator.key")))
+	fmt.Println("rejected:", errors.Is(err, os.ErrNotExist))
+
+	// Output:
+	// accepted: true
+	// rejected: true
 }
