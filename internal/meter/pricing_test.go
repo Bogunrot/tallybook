@@ -78,6 +78,94 @@ func ExampleNewCatalog() {
 	// rejected: true
 }
 
+// ExampleCatalogVersion shows how a caller fills in a CatalogVersion. All
+// three fields are the caller's to set — the version number and the
+// effective ledger price_book published for it, and the Schedule parsed
+// from that version's own document — because a CatalogVersion is input to
+// NewCatalog, never an output of this package. The zero value sets none of
+// them, and NewCatalog rejects it with ErrNilSchedule rather than accepting
+// a version that could never price anything.
+func ExampleCatalogVersion() {
+	schedule, err := ParseSchedule([]byte(`{"rules":[{"method":"GET","path_template":"/v1/items","unit_price":"1500"}]}`))
+	if err != nil {
+		panic(err)
+	}
+
+	// A caller sets every field. The version number and effective ledger
+	// come from the price_book publish event (§4); the schedule is parsed
+	// from the document that version's uri pointed at.
+	entry := CatalogVersion{
+		Version:         1,
+		EffectiveLedger: 1000,
+		Schedule:        schedule,
+	}
+	fmt.Println("version:", entry.Version)
+	fmt.Println("effective ledger:", entry.EffectiveLedger)
+	fmt.Println("schedule set:", entry.Schedule != nil)
+
+	// The zero value sets none of them, and is rejected outright.
+	_, err = NewCatalog(CatalogVersion{})
+	fmt.Println("zero value rejected:", errors.Is(err, ErrNilSchedule))
+
+	// Output:
+	// version: 1
+	// effective ledger: 1000
+	// schedule set: true
+	// zero value rejected: true
+}
+
+// ExampleCatalog shows how a caller obtains a Catalog and reads it. Its
+// one field, versions, is unexported — NewCatalog validates and sorts the
+// caller-supplied CatalogVersion entries and is the only way to get a
+// working Catalog — so a caller sets no Catalog fields directly. VersionAt
+// is the read path: a local mirror of price_book.version_at (§4) that
+// resolves an observation ledger to the version whose schedule prices it,
+// with no chain round trip. The zero value has no versions at all.
+func ExampleCatalog() {
+	schedV1, err := ParseSchedule([]byte(`{"rules":[{"method":"GET","path_template":"/v1/items","unit_price":"100"}]}`))
+	if err != nil {
+		panic(err)
+	}
+	schedV2, err := ParseSchedule([]byte(`{"rules":[{"method":"GET","path_template":"/v1/items","unit_price":"200"}]}`))
+	if err != nil {
+		panic(err)
+	}
+
+	// How a caller builds it: every published version, in any order —
+	// NewCatalog sorts by EffectiveLedger.
+	catalog, err := NewCatalog(
+		CatalogVersion{Version: 2, EffectiveLedger: 2000, Schedule: schedV2},
+		CatalogVersion{Version: 1, EffectiveLedger: 1000, Schedule: schedV1},
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	// How a caller reads it: which version was effective at an
+	// observation ledger. A version applies from its own EffectiveLedger
+	// up to the ledger before the next one.
+	v, err := catalog.VersionAt(1999)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("ledger 1999 prices under version", v.Version)
+	v, err = catalog.VersionAt(2000)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("ledger 2000 prices under version", v.Version)
+
+	// The zero value: no versions were supplied, and there is no exported
+	// field a caller could have supplied them through.
+	var zero Catalog
+	fmt.Println("zero value version count:", len(zero.versions))
+
+	// Output:
+	// ledger 1999 prices under version 1
+	// ledger 2000 prices under version 2
+	// zero value version count: 0
+}
+
 func TestCatalog_VersionAt_PicksTheEffectiveVersion(t *testing.T) {
 	schedV1 := mustSchedule(t, `{"rules":[{"method":"GET","path_template":"/v1/x","unit_price":"100"}]}`)
 	schedV2 := mustSchedule(t, `{"rules":[{"method":"GET","path_template":"/v1/x","unit_price":"200"}]}`)
