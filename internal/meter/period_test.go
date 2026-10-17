@@ -432,3 +432,41 @@ func ExampleNewPeriodCloser() {
 	// accepted
 	// rejected
 }
+
+// ExampleLedgerSource shows the difference between the zero value and a
+// properly-constructed LedgerSource. The interface has exactly one method —
+// CurrentLedger, the current ledger sequence — and the package never fills
+// it in: a caller supplies an implementation (internal/stellar.Client in
+// production) and hands it to PeriodCloser.Run, which calls only that
+// method, once per tick. The zero value is a nil interface with nothing
+// behind it; the constructed value below is what Run actually reads.
+func ExampleLedgerSource() {
+	// The zero value: there is no implementation behind a nil interface,
+	// so Run would have no ledger to read.
+	var unset LedgerSource
+	fmt.Println("zero value is nil:", unset == nil)
+
+	// A properly-constructed one: any type providing CurrentLedger. The
+	// caller sets no fields — the interface has none, and the package
+	// cannot fill one in — it supplies the implementation.
+	var ledgers LedgerSource = exampleLedgerSource(4590000)
+	ledger, err := ledgers.CurrentLedger(context.Background())
+	if err != nil {
+		fmt.Println("current ledger:", err)
+		return
+	}
+	fmt.Println("current ledger:", ledger)
+
+	// Output:
+	// zero value is nil: true
+	// current ledger: 4590000
+}
+
+// exampleLedgerSource is a LedgerSource that always reports the same
+// ledger, so the example's output is deterministic and independent of any
+// chain.
+type exampleLedgerSource uint32
+
+func (l exampleLedgerSource) CurrentLedger(context.Context) (uint32, error) {
+	return uint32(l), nil
+}
