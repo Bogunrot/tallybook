@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stellar/go-stellar-sdk/xdr"
@@ -15,7 +16,7 @@ type rawEvent struct {
 	Value string   `json:"value"`
 }
 
-func loadEventFixture(t *testing.T, name string) []rawEvent {
+func loadEventFixture(t testing.TB, name string) []rawEvent {
 	t.Helper()
 	path := filepath.Join("..", "..", "testdata", "stellar", name+".json")
 	data, err := os.ReadFile(path)
@@ -334,4 +335,86 @@ func TestDecodeEventFields_RejectsWrongLength(t *testing.T) {
 	if _, err := decodeEventFields(valueB64, 2); err == nil {
 		t.Error("decodeEventFields accepted a value with the wrong number of fields")
 	}
+}
+
+func FuzzDecodeEvents(f *testing.F) {
+	f.Add("")
+	f.Add("not-base64!")
+	for _, fixture := range []string{"events_pricebook_publish", "events_statement_registry"} {
+		for _, event := range loadEventFixture(f, fixture) {
+			f.Add(event.Value)
+		}
+	}
+
+	address, err := ScvAddress("GCWV2YQTXWP72QTU5YX5FM237RCHY6REV6BL6TKBEFCQ5R2QCTX67VUG")
+	if err != nil {
+		f.Fatalf("ScvAddress: %v", err)
+	}
+	amount, err := ScvI128(big.NewInt(1))
+	if err != nil {
+		f.Fatalf("ScvI128: %v", err)
+	}
+	threeFieldWithdraw, err := MarshalScValBase64(ScvVec([]xdr.ScVal{address, amount, ScvU32(3)}))
+	if err != nil {
+		f.Fatalf("MarshalScValBase64: %v", err)
+	}
+	f.Add(threeFieldWithdraw)
+	if _, err := DecodeChannelWithdrawEvent(threeFieldWithdraw); err == nil || !strings.Contains(err.Error(), "has 3 fields") {
+		f.Fatalf("three-field Withdraw payload error = %v, want a field-count rejection", err)
+	}
+
+	decoders := []struct {
+		name  string
+		check func(string) (bool, error)
+	}{
+		{"price_book publish", func(v string) (bool, error) {
+			event, err := DecodePriceBookPublishEvent(v)
+			return event != nil && event.Operator != "", err
+		}},
+		{"statement anchor", func(v string) (bool, error) {
+			event, err := DecodeStatementAnchorEvent(v)
+			return event != nil && event.Operator != "" && event.Consumer != "" && event.AmountBilled != nil && event.AmountSettled != nil, err
+		}},
+		{"statement dispute", func(v string) (bool, error) {
+			event, err := DecodeStatementDisputeEvent(v)
+			return event != nil && event.Operator != "" && event.Consumer != "", err
+		}},
+		{"statement resolve", func(v string) (bool, error) {
+			event, err := DecodeStatementResolveEvent(v)
+			return event != nil && event.Operator != "" && event.Consumer != "" && event.AmountCredited != nil, err
+		}},
+		{"channel Open", func(v string) (bool, error) {
+			event, err := DecodeChannelOpenEvent(v)
+			return event != nil && event.From != "" && event.To != "" && event.Token != "" && event.Amount != nil, err
+		}},
+		{"channel Close", func(v string) (bool, error) {
+			event, err := DecodeChannelCloseEvent(v)
+			return event != nil, err
+		}},
+		{"channel Withdraw", func(v string) (bool, error) {
+			event, err := DecodeChannelWithdrawEvent(v)
+			return event != nil && event.To != "" && event.Amount != nil, err
+		}},
+		{"channel Refund", func(v string) (bool, error) {
+			event, err := DecodeChannelRefundEvent(v)
+			return event != nil && event.From != "" && event.Amount != nil, err
+		}},
+	}
+	f.Fuzz(func(t *testing.T, value string) {
+		if len(value) > 1<<16 {
+			t.Skip()
+		}
+		for _, decoder := range decoders {
+			populated, err := decoder.check(value)
+			if err == nil {
+				if !populated {
+					t.Errorf("%s decoder returned an incomplete event", decoder.name)
+				}
+				continue
+			}
+			if strings.TrimSpace(err.Error()) == "" || (!strings.Contains(err.Error(), "event") && !strings.Contains(err.Error(), "field")) {
+				t.Errorf("%s decoder returned an uncontextualized error: %v", decoder.name, err)
+			}
+		}
+	})
 }

@@ -72,7 +72,7 @@ func MatchesTopic(topicB64 []string, want ...string) (bool, error) {
 func decodeEventFields(valueB64 string, want int) ([]xdr.ScVal, error) {
 	v, err := UnmarshalScValBase64(valueB64)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal event value: %w", err)
+		return nil, fmt.Errorf("event value: expected base64-encoded XDR ScVal Vec: %w", err)
 	}
 	items, err := DecodeVec(v)
 	if err != nil {
