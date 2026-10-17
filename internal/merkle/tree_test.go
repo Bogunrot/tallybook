@@ -1,8 +1,10 @@
 package merkle
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -129,9 +131,81 @@ func TestBuildTree_RejectsEmpty(t *testing.T) {
 func TestBuildTree_RejectsDuplicateLeaf(t *testing.T) {
 	leaf := [32]byte{1, 2, 3}
 	_, err := BuildTree([][32]byte{leaf, {4, 5, 6}, leaf})
-	if err == nil {
-		t.Fatal("BuildTree accepted a duplicate leaf")
+	if !errors.Is(err, ErrDuplicateLeaf) {
+		t.Fatalf("BuildTree error = %v, want ErrDuplicateLeaf", err)
 	}
+}
+
+func TestProofDepth_RejectsLeafCountOverContractLimit(t *testing.T) {
+	if got := proofDepth(1 << maxProofLength); got != maxProofLength {
+		t.Fatalf("proofDepth(2^%d) = %d, want %d", maxProofLength, got, maxProofLength)
+	}
+	tooMany := (uint64(1) << maxProofLength) + 1
+	if err := validateProofDepth(tooMany); !errors.Is(err, ErrProofTooLong) {
+		t.Fatalf("validateProofDepth(%d) error = %v, want ErrProofTooLong", tooMany, err)
+	}
+}
+
+func TestVerifyProof_AllowsEqualSibling(t *testing.T) {
+	leaf := [32]byte{0x42}
+	root := sortedPairHash(leaf, leaf)
+	if !VerifyProof(root, leaf, Proof{leaf}) {
+		t.Fatal("VerifyProof rejected a proof whose sibling equals the leaf")
+	}
+}
+
+func FuzzBuildTreeProofAgreement(f *testing.F) {
+	f.Add([]byte{0, 0, 0})   // one leaf
+	f.Add([]byte{6, 0, 0})   // seven leaves, unbalanced at multiple levels
+	f.Add([]byte{255, 3, 0}) // 1024 leaves
+	f.Add([]byte{3, 0, 1})   // four leaves with a repeated leaf
+	f.Add([]byte{1, 0, 0})   // two unique leaves; equal-sibling fold is tested above
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > 4096 {
+			t.Skip()
+		}
+
+		leafCount := 1
+		if len(data) >= 2 {
+			leafCount += int(uint16(data[0])|uint16(data[1])<<8) % 1024
+		}
+		leaves := make([][32]byte, leafCount)
+		seed := make([]byte, len(data)+4)
+		copy(seed, data)
+		for i := range leaves {
+			seed[len(data)] = byte(i)
+			seed[len(data)+1] = byte(i >> 8)
+			seed[len(data)+2] = byte(i >> 16)
+			seed[len(data)+3] = byte(i >> 24)
+			leaves[i] = sha256.Sum256(seed)
+		}
+
+		duplicate := len(data) >= 3 && data[2]&1 != 0 && leafCount > 1
+		if duplicate {
+			leaves[leafCount-1] = leaves[0]
+		}
+		tree, err := BuildTree(leaves)
+		if duplicate {
+			if tree != nil || !errors.Is(err, ErrDuplicateLeaf) {
+				t.Fatalf("duplicate leaf set returned tree=%v, error=%v; want nil tree and ErrDuplicateLeaf", tree, err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("BuildTree(%d leaves): %v", leafCount, err)
+		}
+		if len(tree.Proofs) != len(leaves) {
+			t.Fatalf("got %d proofs for %d leaves", len(tree.Proofs), len(leaves))
+		}
+		for i, proof := range tree.Proofs {
+			if len(proof) > maxProofLength {
+				t.Fatalf("proof %d has %d nodes, cap is %d", i, len(proof), maxProofLength)
+			}
+			if !VerifyProof(tree.Root, leaves[i], proof) {
+				t.Fatalf("proof %d of %d leaves does not verify", i, leafCount)
+			}
+		}
+	})
 }
 
 func TestBuildTree_SingleLeafHasEmptyProofAndRootEqualsLeaf(t *testing.T) {
