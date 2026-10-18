@@ -356,6 +356,29 @@ func TestStatementRegistry_ResolveDispute(t *testing.T) {
 	}
 }
 
+// ExampleResolveDisputeArgs builds the exact argument vector that both
+// parties must authorize for resolve_dispute.
+func ExampleResolveDisputeArgs() {
+	resolutionHash := sha256.Sum256([]byte("example resolution"))
+	amountCredited := big.NewInt(300)
+	args, err := ResolveDisputeArgs(
+		"GBUSXHXV53RH2DXO4OJZXJY7AULCBFFO6DHGAAL6XK77BG5V2NSE253A",
+		3,
+		resolutionHash,
+		amountCredited,
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	credited, err := DecodeI128(args[3])
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("arguments=%d sequence=%d amount_credited=%s\n", len(args), *args[1].U64, credited)
+	// Output:
+	// arguments=4 sequence=3 amount_credited=300
+}
+
 // ExampleStatementRegistry_ResolveDispute resolves a dispute with both the
 // operator's and the consumer's authorization attached — the dual-auth case
 // CLAUDE.md §4 calls out. consumerAuth is built here with
