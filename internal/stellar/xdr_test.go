@@ -424,6 +424,38 @@ func TestUnmarshalScValBase64_RejectsGarbage(t *testing.T) {
 	}
 }
 
+func ExampleScvBytes() {
+	value := ScvBytes([]byte{0x01, 0x02, 0x03})
+	decoded, err := DecodeBytes(value)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("%x\n", decoded)
+	// Output: 010203
+}
+
+func ExampleMapField() {
+	value, err := MapField(map[string]xdr.ScVal{"amount": ScvU64(1250)}, "amount")
+	if err != nil {
+		log.Fatal(err)
+	}
+	amount, err := DecodeU64(value)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(amount)
+	// Output: 1250
+}
+
+func ExampleMarshalScValBase64() {
+	encoded, err := MarshalScValBase64(ScvU32(42))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(encoded == "AAAAAwAAACo=")
+	// Output: true
+}
+
 // ExampleUnmarshalScValBase64 decodes "AAAAAwAAACo=" — the exact base64 a
 // Soroban RPC response carries for ScVal::U32(42), and the exact value
 // MarshalScValBase64 returns for ScvU32(42) — then reads it back with
