@@ -15,6 +15,51 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
+func ExampleScvI32() {
+	v, err := DecodeI32(ScvI32(-42))
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(v)
+	// Output:
+	// -42
+}
+
+func ExampleScvI64() {
+	v, err := DecodeI64(ScvI64(9007199254740991))
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(v)
+	// Output:
+	// 9007199254740991
+}
+
+func ExampleScvSymbol() {
+	v, err := DecodeSymbol(ScvSymbol("price_v"))
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(v)
+	// Output:
+	// price_v
+}
+
+func ExampleScvAddress() {
+	addr := "GAAACAQDAQCQMBYIBEFAWDANBYHRAEISCMKBKFQXDAMRUGY4DUPB7JZX"
+	v, err := ScvAddress(addr)
+	if err != nil {
+		panic(err)
+	}
+	got, err := DecodeAddress(v)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(got)
+	// Output:
+	// GAAACAQDAQCQMBYIBEFAWDANBYHRAEISCMKBKFQXDAMRUGY4DUPB7JZX
+}
+
 func TestScvU32_RoundTrip(t *testing.T) {
 	for _, v := range []uint32{0, 1, 42, 1 << 31, 1<<32 - 1} {
 		got, err := DecodeU32(ScvU32(v))
