@@ -62,6 +62,15 @@ func ExampleNewClient() {
 	// rejected: errors.Is(err, context.Canceled) = true
 }
 
+// ExampleRPCError_Error demonstrates the stable protocol error message
+// callers see when Soroban RPC returns a JSON-RPC error.
+func ExampleRPCError_Error() {
+	err := &RPCError{Code: -32602, Message: "invalid_xdr"}
+	fmt.Println(err.Error())
+	// Output:
+	// soroban rpc: code -32602: invalid_xdr
+}
+
 func TestClient_GetLatestLedger(t *testing.T) {
 	srv, lastRequest := fixtureServer(t, "get_latest_ledger")
 	c := NewClient(srv.URL, nil)
