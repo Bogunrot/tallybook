@@ -310,6 +310,52 @@ func TestScvMap_RoundTrip(t *testing.T) {
 	}
 }
 
+func ExampleScvBool() {
+	value := ScvBool(true)
+	fmt.Println(*value.B)
+	// Output: true
+}
+
+func ExampleScvI128() {
+	value, err := ScvI128(big.NewInt(123456789))
+	if err != nil {
+		log.Fatal(err)
+	}
+	decoded, err := DecodeI128(value)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(decoded)
+	// Output: 123456789
+}
+
+func ExampleScvMap() {
+	value := ScvMap([]xdr.ScMapEntry{
+		MapEntry("amount", ScvU64(42)),
+		MapEntry("units", ScvU64(3)),
+	})
+	decoded, err := DecodeMap(value)
+	if err != nil {
+		log.Fatal(err)
+	}
+	amount, err := DecodeU64(decoded["amount"])
+	if err != nil {
+		log.Fatal(err)
+	}
+	units, err := DecodeU64(decoded["units"])
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("amount: %d units: %d\n", amount, units)
+	// Output: amount: 42 units: 3
+}
+
+func ExampleScvString() {
+	value := ScvString("monthly")
+	fmt.Println(*value.Str)
+	// Output: monthly
+}
+
 func TestDecode_WrongTypeReturnsTypedError(t *testing.T) {
 	_, err := DecodeU32(ScvBool(true))
 	if err == nil {
